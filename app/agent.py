@@ -11,7 +11,6 @@ import json
 import os
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-import numpy as np
 from datetime import datetime
 
 from .language_detector import get_language_detector
