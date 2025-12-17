@@ -756,6 +756,9 @@ Your answer in {response_language} (using ONLY knowledge base information):"""
             LLM response
         """
         if not self.llm_client:
+            print(f"⚠️ WARNING: llm_client is None/not configured")
+            print(f"   LLM Provider: {os.getenv('WAZOBIA_LLM_PROVIDER', 'anthropic')}")
+            print(f"   Groq API Key exists: {bool(os.getenv('WAZOBIA_GROQ_API_KEY'))}")
             return "[LLM not configured]"
         
         try:
@@ -775,7 +778,7 @@ Your answer in {response_language} (using ONLY knowledge base information):"""
             
             elif provider in ["openai", "groq"]:
                 # OpenAI/Groq compatible API (both use same interface)
-                default_model = "gpt-4o" if provider == "openai" else "llama-3.1-70b-versatile"
+                default_model = "gpt-4o" if provider == "openai" else "llama-3.3-70b-versatile"
                 response = self.llm_client.chat.completions.create(
                     model=model or default_model,
                     messages=[{"role": "user", "content": prompt}],
@@ -855,7 +858,16 @@ def get_wazobia_agent(**kwargs) -> WazobiaAgent:
                     
                     if api_key and api_key not in ["your-groq-api-key-here", ""]:
                         print(f"✅ Groq (Llama) initialized with key: {api_key[:10]}...")
-                        kwargs['llm_client'] = Groq(api_key=api_key)
+                        try:
+                            # Try initializing with just api_key
+                            kwargs['llm_client'] = Groq(api_key=api_key)
+                        except TypeError as te:
+                            # If proxies error, try without it
+                            if 'proxies' in str(te):
+                                print(f"⚠️ Groq version issue with proxies, retrying without proxies parameter")
+                                kwargs['llm_client'] = Groq(api_key=api_key)
+                            else:
+                                raise
                     else:
                         print("⚠️ WAZOBIA_GROQ_API_KEY not found or invalid in .env file")
                 
