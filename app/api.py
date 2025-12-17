@@ -17,6 +17,7 @@ import uvicorn
 from .agent import get_wazobia_agent, WazobiaAgent
 from .language_detector import get_language_detector
 from .config import get_settings
+from .routers import auth
 
 
 # Initialize FastAPI app
@@ -36,6 +37,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(auth.router)
 
 # Get settings
 settings = get_settings()
