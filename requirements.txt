@@ -1,43 +1,7 @@
-# Wazobia Agent Dependencies
-
-# Core dependencies
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
-
-# API and networking
-python-multipart==0.0.6
-httpx==0.26.0
-
-# UI
-streamlit==1.29.0
-
-# LLM integrations (uncomment the one you're using)
-anthropic==0.39.0  # Anthropic Claude API
-groq==0.4.1  # Groq API for Llama 3 (fast, free)
-# openai==1.54.0  # OpenAI GPT API
-
-# Optional: Embeddings and vector stores (for enhanced RAG)
-# sentence-transformers==2.3.1
-# chromadb==0.4.22
-# faiss-cpu==1.7.4
-
-# Optional: Advanced NLP
-# transformers==4.36.0
-# torch==2.1.2
-
-# Testing
-pytest==7.4.3
-pytest-asyncio==0.23.3
-pytest-cov==4.1.0
-
-# Development tools
-black==23.12.1
-flake8==7.0.0
-mypy==1.8.0
-pre-commit==3.6.0
-
-# Utilities
 python-dotenv==1.0.0
-loguru==0.7.2
+groq==0.4.1
+requests==2.31.0

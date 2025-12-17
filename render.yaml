@@ -1,19 +1,22 @@
 services:
   - type: web
     name: wazobia-agent-backend
-    env: python
-    region: oregon
-    plan: free
-    branch: main
+    runtime: python
+    runtimeVersion: 3.10.15
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.api:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.17
-      - key: GROQ_API_KEY
-        sync: false
-      - key: ENVIRONMENT
+        value: 3.10.15
+      - key: WAZOBIA_LLM_PROVIDER
+        value: groq
+      - key: WAZOBIA_ENVIRONMENT
         value: production
-      - key: API_HOST
-        value: 0.0.0.0
-    healthCheckPath: /health
+      - key: GROQ_API_KEY
+        fromDatabase:
+          name: wazobia
+          property: groq_api_key
+    disk:
+      name: wazobia-data
+      mountPath: /var/data
+      sizeGB: 1
