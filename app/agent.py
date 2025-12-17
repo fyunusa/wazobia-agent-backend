@@ -852,6 +852,7 @@ def get_wazobia_agent(**kwargs) -> WazobiaAgent:
                 
                 elif llm_provider == "groq":
                     from groq import Groq
+                    import httpx
                     api_key = os.getenv("WAZOBIA_GROQ_API_KEY")
                     if api_key:
                         api_key = api_key.strip('"').strip("'")
@@ -859,15 +860,16 @@ def get_wazobia_agent(**kwargs) -> WazobiaAgent:
                     if api_key and api_key not in ["your-groq-api-key-here", ""]:
                         print(f"✅ Groq (Llama) initialized with key: {api_key[:10]}...")
                         try:
-                            # Try initializing with just api_key
-                            kwargs['llm_client'] = Groq(api_key=api_key)
-                        except TypeError as te:
-                            # If proxies error, try without it
-                            if 'proxies' in str(te):
-                                print(f"⚠️ Groq version issue with proxies, retrying without proxies parameter")
+                            # Create an HTTP client without proxies
+                            http_client = httpx.Client(proxies=None)
+                            kwargs['llm_client'] = Groq(api_key=api_key, http_client=http_client)
+                        except (TypeError, Exception) as e:
+                            # Fallback: try with just api_key
+                            print(f"⚠️ Groq initialization with http_client failed, trying simple init: {str(e)}")
+                            try:
                                 kwargs['llm_client'] = Groq(api_key=api_key)
-                            else:
-                                raise
+                            except Exception as e2:
+                                print(f"⚠️ Simple Groq init also failed: {str(e2)}")
                     else:
                         print("⚠️ WAZOBIA_GROQ_API_KEY not found or invalid in .env file")
                 
