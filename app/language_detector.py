@@ -3,7 +3,7 @@ Language Detection Service
 =========================
 Detect and identify Nigerian languages (Hausa, Nigerian Pidgin, Yoruba) and English.
 
-Author: Firdausi Yakubu
+Author: Umar Farouk Yunusa
 Date: December 15, 2025
 """
 

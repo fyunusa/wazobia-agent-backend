@@ -311,5 +311,5 @@ Built for Northwest University, Kano, to support Nigerian language AI research a
 ---
 
 **Implementation Date**: December 15, 2025  
-**Author**: Firdausi Yakubu  
+**Author**: Umar Farouk Yunusa  
 **Institution**: Northwest University, Kano

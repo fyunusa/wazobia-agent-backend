@@ -3,7 +3,7 @@ Prompt Loader Service
 ====================
 Service to load, parse, and format XML-tagged prompts for the Wazobia Agent.
 
-Author: Firdausi Yakubu
+Author: Umar Farouk Yunusa
 Date: December 15, 2025
 """
 

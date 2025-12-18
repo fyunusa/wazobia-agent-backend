@@ -3,7 +3,7 @@ Configuration Management
 ========================
 Configuration settings for the Wazobia Agent.
 
-Author: Firdausi Yakubu
+Author: Umar Farouk Yunusa
 Date: December 15, 2025
 """
 

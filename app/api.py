@@ -3,11 +3,11 @@ Wazobia Agent API
 ================
 FastAPI-based REST API for the Wazobia multilingual agent.
 
-Author: Firdausi Yakubu
+Author: Umar Farouk Yunusa
 Date: December 15, 2025
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -19,6 +19,7 @@ from .agent import get_wazobia_agent, WazobiaAgent
 from .language_detector import get_language_detector
 from .config import get_settings
 from .routers import auth, conversations
+from .database import get_db
 
 
 # Initialize FastAPI app
@@ -218,7 +219,10 @@ async def health_check():
 
 
 @app.post("/chat", response_model=MessageResponse)
-async def chat(request: MessageRequest):
+async def chat(
+    request: MessageRequest,
+    authorization: Optional[str] = Header(None)
+):
     """
     Process a chat message and generate a response.
     
@@ -246,6 +250,45 @@ async def chat(request: MessageRequest):
                 message=request.message,
                 context=context
             )
+            
+            # Save to database if user is authenticated
+            if authorization and authorization.startswith("Bearer "):
+                try:
+                    token = authorization.replace("Bearer ", "")
+                    db = get_db()
+                    session = db.get_session(token)
+                    
+                    if session:
+                        user_id = session['user_id']
+                        
+                        # Get or create a conversation for this user
+                        conversations_list = db.get_user_conversations(user_id)
+                        
+                        if conversations_list:
+                            # Use the most recent conversation
+                            conversation_id = conversations_list[0]['id']
+                        else:
+                            # Create a new conversation
+                            conversation_id = db.create_conversation(user_id, "New Conversation")
+                        
+                        # Save user message
+                        db.add_message(
+                            conversation_id=conversation_id,
+                            role='user',
+                            content=request.message,
+                            language=result.get('language')
+                        )
+                        
+                        # Save agent response
+                        db.add_message(
+                            conversation_id=conversation_id,
+                            role='assistant',
+                            content=result['response'],
+                            language=result.get('language')
+                        )
+                except Exception as e:
+                    # Log but don't fail the request if DB save fails
+                    print(f"Failed to save conversation: {e}")
             
             return MessageResponse(
                 response=result['response'],

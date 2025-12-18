@@ -5,7 +5,7 @@ Multilingual AI agent for Nigerian languages.
 """
 
 __version__ = "1.0.0"
-__author__ = "Firdausi Yakubu"
+__author__ = "Umar Farouk Yunusa"
 
 from .agent import WazobiaAgent, get_wazobia_agent
 from .language_detector import LanguageDetector, get_language_detector

@@ -359,7 +359,7 @@ MIT License - see LICENSE file for details
 
 ## 👥 Author
 
-**Firdausi Yakubu**  
+**Umar Farouk Yunusa**  
 Department of Science Education  
 Northwest University, Kano
 
