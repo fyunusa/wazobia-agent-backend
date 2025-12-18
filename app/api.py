@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import uvicorn
+import asyncio
 
 from .agent import get_wazobia_agent, WazobiaAgent
 from .language_detector import get_language_detector
@@ -47,6 +48,9 @@ settings = get_settings()
 
 # Initialize agent (lazy loading)
 _agent: Optional[WazobiaAgent] = None
+
+# Rate limiting: Maximum 3 concurrent chat requests
+chat_semaphore = asyncio.Semaphore(3)
 
 
 def get_agent() -> WazobiaAgent:
@@ -223,31 +227,36 @@ async def chat(request: MessageRequest):
     - Understand the intent
     - Retrieve relevant knowledge
     - Generate an appropriate response
-    """
-    try:
-        agent = get_agent()
-        
-        # Add preferred_languages to context if provided
-        context = request.context or {}
-        if request.preferred_languages:
-            context['preferred_languages'] = request.preferred_languages
-        
-        # Process message
-        result = agent.process_message(
-            message=request.message,
-            context=context
-        )
-        
-        return MessageResponse(
-            response=result['response'],
-            language=result['language'],
-            detected_language=result['language'],
-            intent=result['intent'],
-            metadata=result.get('metadata', {})
-        )
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
+    Rate limited to 3 concurrent requests to avoid exceeding free API limits.
+    """
+    # Acquire semaphore to limit concurrent requests
+    async with chat_semaphore:
+        try:
+            agent = get_agent()
+            
+            # Add preferred_languages to context if provided
+            context = request.context or {}
+            if request.preferred_languages:
+                context['preferred_languages'] = request.preferred_languages
+            
+            # Process message
+            result = await asyncio.to_thread(
+                agent.process_message,
+                message=request.message,
+                context=context
+            )
+            
+            return MessageResponse(
+                response=result['response'],
+                language=result['language'],
+                detected_language=result['language'],
+                intent=result['intent'],
+                metadata=result.get('metadata', {})
+            )
+        
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
 
 
 @app.post("/translate", response_model=TranslationResponse)
