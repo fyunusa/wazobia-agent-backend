@@ -41,6 +41,14 @@ class Database:
             )
         """)
         
+        # Check if is_admin column exists, add it if not
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'is_admin' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+            conn.commit()
+            print("✅ Added is_admin column to users table")
+        
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,6 +84,21 @@ class Database:
         """)
         
         conn.commit()
+        
+        # Create default admin user if not exists
+        cursor.execute("SELECT * FROM users WHERE email = ?", ('admin@wazobia.ai',))
+        if not cursor.fetchone():
+            admin_password = 'admin123'  # Default password - should be changed
+            password_hash = self.hash_password(admin_password)
+            created_at = datetime.now().isoformat()
+            
+            cursor.execute("""
+                INSERT INTO users (email, username, password_hash, created_at, is_admin)
+                VALUES (?, ?, ?, ?, ?)
+            """, ('admin@wazobia.ai', 'admin', password_hash, created_at, 1))
+            conn.commit()
+            print("✅ Default admin user created: admin@wazobia.ai / admin123")
+        
         conn.close()
     
     def hash_password(self, password: str) -> str:
@@ -93,7 +116,7 @@ class Database:
         except Exception:
             return False
     
-    def create_user(self, email: str, username: str, password: str) -> Optional[Dict[str, Any]]:
+    def create_user(self, email: str, username: str, password: str, is_admin: bool = False) -> Optional[Dict[str, Any]]:
         """Create a new user"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -103,9 +126,9 @@ class Database:
             created_at = datetime.now().isoformat()
             
             cursor.execute("""
-                INSERT INTO users (email, username, password_hash, created_at)
-                VALUES (?, ?, ?, ?)
-            """, (email, username, password_hash, created_at))
+                INSERT INTO users (email, username, password_hash, created_at, is_admin)
+                VALUES (?, ?, ?, ?, ?)
+            """, (email, username, password_hash, created_at, 1 if is_admin else 0))
             
             conn.commit()
             user_id = cursor.lastrowid
@@ -114,7 +137,8 @@ class Database:
                 'id': user_id,
                 'email': email,
                 'username': username,
-                'created_at': created_at
+                'created_at': created_at,
+                'is_admin': is_admin
             }
         except sqlite3.IntegrityError:
             return None
@@ -314,6 +338,72 @@ class Database:
         return {
             'conversation_count': conversation_count,
             'message_count': message_count
+        }
+    
+    def get_admin_stats(self) -> Dict[str, Any]:
+        """Get admin statistics"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Total users
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_users = cursor.fetchone()[0]
+        
+        # Active users (logged in within last 30 days)
+        cursor.execute("""
+            SELECT COUNT(*) FROM users 
+            WHERE last_login IS NOT NULL 
+            AND datetime(last_login) > datetime('now', '-30 days')
+        """)
+        active_users = cursor.fetchone()[0]
+        
+        # Total conversations
+        cursor.execute("SELECT COUNT(*) FROM conversations")
+        total_conversations = cursor.fetchone()[0]
+        
+        # Total messages
+        cursor.execute("SELECT COUNT(*) FROM messages")
+        total_messages = cursor.fetchone()[0]
+        
+        # User messages (role='user')
+        cursor.execute("SELECT COUNT(*) FROM messages WHERE role='user'")
+        user_messages = cursor.fetchone()[0]
+        
+        # Recent signups (last 7 days)
+        cursor.execute("""
+            SELECT COUNT(*) FROM users 
+            WHERE datetime(created_at) > datetime('now', '-7 days')
+        """)
+        recent_signups = cursor.fetchone()[0]
+        
+        # Recent activity (last 24 hours)
+        cursor.execute("""
+            SELECT COUNT(*) FROM messages 
+            WHERE datetime(created_at) > datetime('now', '-1 day')
+        """)
+        messages_24h = cursor.fetchone()[0]
+        
+        # Language distribution
+        cursor.execute("""
+            SELECT language, COUNT(*) as count 
+            FROM messages 
+            WHERE language IS NOT NULL 
+            GROUP BY language 
+            ORDER BY count DESC
+        """)
+        language_stats = {row[0]: row[1] for row in cursor.fetchall()}
+        
+        conn.close()
+        
+        return {
+            'total_users': total_users,
+            'active_users': active_users,
+            'total_conversations': total_conversations,
+            'total_messages': total_messages,
+            'user_messages': user_messages,
+            'recent_signups': recent_signups,
+            'messages_24h': messages_24h,
+            'language_stats': language_stats
         }
 
 

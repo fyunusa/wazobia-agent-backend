@@ -131,3 +131,13 @@ async def get_me(user: dict = Depends(get_current_user)):
     """Get current user info"""
     user_data = {k: v for k, v in user.items() if k != 'password_hash'}
     return {"user": user_data}
+
+
+@router.get("/admin/stats")
+async def get_admin_stats(user: dict = Depends(get_current_user), db: Database = Depends(get_db)):
+    """Get admin statistics (admin only)"""
+    if not user.get('is_admin'):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    stats = db.get_admin_stats()
+    return stats
