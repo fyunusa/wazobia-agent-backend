@@ -85,19 +85,20 @@ class Database:
         
         conn.commit()
         
-        # Create default admin user if not exists (check both email and username)
-        cursor.execute("SELECT * FROM users WHERE email = ? OR username = ?", ('admin@wazobia.ai', 'admin'))
-        if not cursor.fetchone():
-            admin_password = 'admin123'  # Default password - should be changed
-            password_hash = self.hash_password(admin_password)
-            created_at = datetime.now().isoformat()
-            
+        # Create default admin user if not exists (use INSERT OR IGNORE for idempotency)
+        admin_password = 'admin123'  # Default password - should be changed
+        password_hash = self.hash_password(admin_password)
+        created_at = datetime.now().isoformat()
+        
+        try:
             cursor.execute("""
-                INSERT INTO users (email, username, password_hash, created_at, is_admin)
+                INSERT OR IGNORE INTO users (email, username, password_hash, created_at, is_admin)
                 VALUES (?, ?, ?, ?, ?)
             """, ('admin@wazobia.ai', 'admin', password_hash, created_at, 1))
             conn.commit()
-            print("✅ Default admin user created: admin@wazobia.ai / admin123")
+            print("✅ Default admin user ensured: admin@wazobia.ai / admin123")
+        except Exception:
+            pass  # Admin user likely already exists
         
         conn.close()
     

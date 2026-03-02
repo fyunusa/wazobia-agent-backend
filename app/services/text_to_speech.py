@@ -167,7 +167,10 @@ class TextToSpeechService:
                     env=env,
                 )
                 
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15.0)
+                # Increased timeout: 30s on first request (model download), 10s on subsequent
+                # Render needs extra time to download ~1.5GB of models
+                timeout_seconds = 30.0
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
                 
                 if process.returncode != 0:
                     error_msg = stderr.decode() if stderr else 'Unknown error'

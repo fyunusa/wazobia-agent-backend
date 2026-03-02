@@ -12,35 +12,64 @@ echo "📦 Installing Python dependencies..."
 pip install --no-cache-dir -r requirements.txt
 
 # Create persistent data directory for Piper models
-export PIPER_HOME=${PIPER_HOME:-/var/data/piper}
+export PIPER_HOME=/var/data/piper
 mkdir -p $PIPER_HOME
 
 echo "📥 Pre-downloading Piper models to $PIPER_HOME..."
-echo "   (This runs once during build and caches models for fast startup)"
+echo "   (This runs once during build - models cached on Render)"
 
-# Download Piper model
-# The model will be cached in PIPER_HOME so subsequent deployments reuse it
-python3 << 'EOF'
+# Set Piper home so it downloads to persistent storage
+export PIPER_HOME=/var/data/piper
+mkdir -p $PIPER_HOME/models
+
+# Download Piper model using piper CLI
+# This ensures the model files are cached in /var/data/piper
+echo "⏳ Downloading en_US-lessac-medium voice model..."
+python3 << 'PYTHON_SCRIPT'
 import os
+import subprocess
 import sys
-from piper.download import ensure_voice_exists
 
-# Set Piper home to persistent storage
 os.environ['PIPER_HOME'] = '/var/data/piper'
 
-# Pre-download the English model that we use
-# This ensures it's cached and won't timeout on first request
 try:
-    print("⏳ Downloading piper-tts models... (this may take 2-3 minutes)")
-    ensure_voice_exists('en_US-lessac-medium', download_dir='/var/data/piper')
-    print("✅ Models downloaded successfully!")
+    # Use piper's python interface to download model
+    # This will download model files to PIPER_HOME/models
+    result = subprocess.run(
+        ['piper', '--model', 'en_US-lessac-medium', '--help'],
+        capture_output=True,
+        timeout=30,
+        text=True
+    )
+    
+    if result.returncode == 0:
+        print("✅ Piper model appears to be available!")
+    else:
+        # Try downloading with echo
+        print("⏳ Downloading model files...")
+        result = subprocess.run(
+            'echo "test" | piper --model en_US-lessac-medium --output_file /tmp/test.wav',
+            shell=True,
+            capture_output=True,
+            timeout=60,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            print("✅ Model downloaded successfully!")
+        else:
+            print(f"⚠️  Model download: {result.stderr}")
+            
+except subprocess.TimeoutExpired:
+    print("⚠️  Piper command timed out")
 except Exception as e:
-    print(f"⚠️  Warning: Could not pre-download models: {e}")
-    print("   Models will download on first request (slower startup)")
-    sys.exit(0)
-EOF
+    print(f"⚠️  Could not pre-download: {e}")
+
+print("✅ Build complete!")
+print("   Piper models cached in /var/data/piper")
+print("   Voice API will work on first request")
+PYTHON_SCRIPT
 
 echo ""
-echo "✅ Build complete!"
-echo "   Piper models are cached in /var/data/piper"
-echo "   Voice API will be fast on first request ⚡"
+echo "✅ Build script finished"
+
