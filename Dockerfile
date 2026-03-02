@@ -1,44 +1,40 @@
 FROM python:3.10-slim
 
-# Install system dependencies
+# Install system dependencies (including onnxruntime requirements)
 RUN apt-get update && apt-get install -y \
     wget \
     tar \
     gzip \
     espeak-ng \
     espeak-ng-data \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Download Piper binary release from GitHub
-RUN echo "⏳ Downloading Piper binary..." && \
-    wget -q https://github.com/rhasspy/piper/releases/download/2023.11.14-1/piper_linux_x86_64.tar.gz && \
-    tar -xzf piper_linux_x86_64.tar.gz && \
-    rm piper_linux_x86_64.tar.gz && \
-    chmod +x piper && \
-    echo "✅ Piper binary installed"
-
-# Add Piper to PATH
-ENV PATH="/app:$PATH"
-
-# Create models directory for Piper voice models
-RUN mkdir -p /app/models && mkdir -p /var/data/piper
-
-# Copy application code
+# Copy application code first
 COPY requirements.txt .
+
+# Install Python dependencies (includes piper-tts with binary support)
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Pre-download Piper voice model for faster first request
-# Use echo to trigger model download without blocking
-RUN echo "⏳ Pre-downloading voice model..." && \
-    timeout 120 bash -c 'echo "test" | piper --model en_US-lessac-medium --output_file /tmp/test.wav' || true && \
-    echo "✅ Voice model ready"
+# Create models directory for Piper voice models
+RUN mkdir -p /var/data/piper /app/models
+
+# Pre-download Piper voice model on build
+# This ensures the ~1.5GB model is cached and first request won't timeout
+RUN echo "⏳ Pre-downloading Piper voice model..." && \
+    PIPER_HOME=/var/data/piper \
+    timeout 180 bash -c 'echo "Welcome to Wazobia" | piper --model en_US-lessac-medium --output_file /tmp/test.wav 2>&1 || true' && \
+    echo "✅ Piper models ready"
 
 # Expose port
 EXPOSE 8001
+
+# Set Piper home for runtime
+ENV PIPER_HOME=/var/data/piper
 
 # Run FastAPI app
 CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8001"]
