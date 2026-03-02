@@ -10,8 +10,3 @@ services:
         value: production
       - key: GROQ_API_KEY
         sync: false
-      - key: PIPER_HOME
-        value: /var/data/piper
-    mounts:
-      - path: /var/data
-        sizeGB: 2

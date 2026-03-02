@@ -20,21 +20,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Create models directory for Piper voice models
-RUN mkdir -p /var/data/piper /app/models
-
-# Pre-download Piper voice model on build
-# This ensures the ~1.5GB model is cached and first request won't timeout
+# Pre-download Piper voice model during build to /app
+# Models will be cached in the Docker image and available immediately at runtime
 RUN echo "⏳ Pre-downloading Piper voice model..." && \
-    PIPER_HOME=/var/data/piper \
-    timeout 180 bash -c 'echo "Welcome to Wazobia" | piper --model en_US-lessac-medium --output_file /tmp/test.wav 2>&1 || true' && \
-    echo "✅ Piper models ready"
+    export PIPER_HOME=/app && \
+    echo "Welcome to Wazobia" | piper --model en_US-lessac-medium --output_file /tmp/test.wav 2>/dev/null || true && \
+    echo "✅ Piper models cached in Docker image"
 
 # Expose port
 EXPOSE 8001
 
-# Set Piper home for runtime
-ENV PIPER_HOME=/var/data/piper
+# Set Piper home to /app where models are already cached in the Docker image
+# This avoids redundant downloads at runtime
+ENV PIPER_HOME=/app
 
 # Run FastAPI app
 CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8001"]

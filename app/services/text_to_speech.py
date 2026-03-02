@@ -22,7 +22,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Set Piper home directory - uses /var/data/piper on Render (persistent storage)
+# Set Piper home directory - uses /app on Render (where models are cached in Docker image)
 # Falls back to default cache on local dev
 PIPER_HOME = os.environ.get('PIPER_HOME', os.path.expanduser('~/.local/share/piper'))
 
