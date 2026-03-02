@@ -85,8 +85,8 @@ class Database:
         
         conn.commit()
         
-        # Create default admin user if not exists
-        cursor.execute("SELECT * FROM users WHERE email = ?", ('admin@wazobia.ai',))
+        # Create default admin user if not exists (check both email and username)
+        cursor.execute("SELECT * FROM users WHERE email = ? OR username = ?", ('admin@wazobia.ai', 'admin'))
         if not cursor.fetchone():
             admin_password = 'admin123'  # Default password - should be changed
             password_hash = self.hash_password(admin_password)
