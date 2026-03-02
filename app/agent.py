@@ -16,6 +16,8 @@ from datetime import datetime
 from .language_detector import get_language_detector
 from .prompt_loader import get_prompt_loader
 from .services import YorubaAgent, HausaAgent, PidginAgent, EnglishAgent
+from .response_validator import get_response_validator
+from .fallback_handler import get_fallback_handler
 
 
 class WazobiaAgent:
@@ -42,6 +44,8 @@ class WazobiaAgent:
         self.prompt_loader = get_prompt_loader()
         self.llm_client = llm_client
         self.embedding_model = embedding_model
+        self.response_validator = get_response_validator(llm_client=llm_client)
+        self.fallback_handler = get_fallback_handler()
         
         # Set knowledge base path
         if knowledge_base_path is None:
@@ -163,6 +167,95 @@ class WazobiaAgent:
             response = self._handle_content_generation(message, detected_lang, context)
         else:
             response = self._handle_general(message, detected_lang, context)
+        
+        # ========== NEW: VALIDATE RESPONSE QUALITY ==========
+        # Get knowledge context if available
+        knowledge_context = response.get('metadata', {}).get('knowledge_context', None)
+        
+        # Validate the response
+        validation_results = self.response_validator.validate_response(
+            response=response['response'],
+            user_message=message,
+            detected_language=response['language'],
+            knowledge_context=knowledge_context,
+            intent=intent
+        )
+        
+        # Add validation metadata
+        response['metadata']['validation'] = {
+            'confidence_score': validation_results['confidence_score'],
+            'is_valid': validation_results['is_valid'],
+            'quality_scores': validation_results.get('detailed_scores', {}),
+        }
+        
+        # If confidence is low, try to improve the response
+        if validation_results['confidence_score'] < 0.7:
+            response['metadata']['validation']['warnings'] = validation_results.get('warnings', [])
+            
+            # Try to improve response if quality is very low
+            if validation_results['confidence_score'] < 0.5:
+                improved = self.response_validator.suggest_improvements(
+                    response['response'],
+                    validation_results,
+                    response['language']
+                )
+                
+                if improved:
+                    # Re-validate improved response
+                    improved_validation = self.response_validator.validate_response(
+                        response=improved,
+                        user_message=message,
+                        detected_language=response['language'],
+                        knowledge_context=knowledge_context,
+                        intent=intent
+                    )
+                    
+                    # Use improved response if it's better
+                    if improved_validation['confidence_score'] > validation_results['confidence_score']:
+                        response['response'] = improved
+                        response['metadata']['validation']['confidence_score'] = improved_validation['confidence_score']
+                        response['metadata']['validation']['improved'] = True
+        
+        # ========== NEW: CHECK IF FALLBACK SHOULD BE USED ==========
+        should_fallback, fallback_scenario = self.fallback_handler.should_use_fallback(
+            validation_results, response['response']
+        )
+        
+        if should_fallback:
+            # Use fallback response
+            fallback_response = self.fallback_handler.get_fallback_response(
+                scenario=fallback_scenario,
+                language=response['language'],
+                additional_info={'original_intent': intent}
+            )
+            
+            # Preserve some original metadata
+            fallback_response['metadata'].update({
+                'original_confidence': validation_results['confidence_score'],
+                'original_intent': intent,
+                'input_language': detected_lang
+            })
+            
+            response = fallback_response
+        
+        # Enhance response if confidence is low (but not using fallback)
+        elif validation_results['confidence_score'] < 0.7:
+            response['response'] = self.fallback_handler.enhance_low_confidence_response(
+                response=response['response'],
+                language=response['language'],
+                confidence_score=validation_results['confidence_score'],
+                suggestions=validation_results.get('suggestions', [])
+            )
+        
+        # Add user-friendly confidence indicator
+        confidence = validation_results['confidence_score']
+        if confidence < 0.5:
+            response['metadata']['confidence_level'] = 'low'
+            response['metadata']['suggestions'] = validation_results.get('suggestions', [])
+        elif confidence < 0.7:
+            response['metadata']['confidence_level'] = 'medium'
+        else:
+            response['metadata']['confidence_level'] = 'high'
         
         # Add to conversation history
         self.conversation_history.append({
@@ -457,7 +550,8 @@ Your answer in {response_language} (using ONLY knowledge base information):"""
             'metadata': {
                 'input_language': language,
                 'sources': [doc.get('title', 'Unknown') for doc in relevant_docs[:3]],
-                'num_sources': len(relevant_docs)
+                'num_sources': len(relevant_docs),
+                'knowledge_context': relevant_docs  # Add context for validation
             }
         }
     
@@ -519,7 +613,8 @@ Your answer in {response_language} (using ONLY knowledge base information):"""
             'metadata': {
                 'has_context': len(relevant_docs) > 0,
                 'num_sources': len(relevant_docs),
-                'input_language': language
+                'input_language': language,
+                'knowledge_context': relevant_docs  # Add context for validation
             }
         }
     

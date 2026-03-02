@@ -360,10 +360,12 @@ class Database:
         # Total conversations
         cursor.execute("SELECT COUNT(*) FROM conversations")
         total_conversations = cursor.fetchone()[0]
+        print(f"📊 Total conversations in DB: {total_conversations}")
         
         # Total messages
         cursor.execute("SELECT COUNT(*) FROM messages")
         total_messages = cursor.fetchone()[0]
+        print(f"📊 Total messages in DB: {total_messages}")
         
         # User messages (role='user')
         cursor.execute("SELECT COUNT(*) FROM messages WHERE role='user'")
@@ -382,6 +384,7 @@ class Database:
             WHERE datetime(created_at) > datetime('now', '-1 day')
         """)
         messages_24h = cursor.fetchone()[0]
+        print(f"📊 Messages in last 24h: {messages_24h}")
         
         # Language distribution
         cursor.execute("""

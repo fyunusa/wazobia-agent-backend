@@ -7,8 +7,9 @@ Author: Umar Farouk Yunusa
 Date: December 15, 2025
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Header
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -18,6 +19,14 @@ import asyncio
 from .agent import get_wazobia_agent, WazobiaAgent
 from .language_detector import get_language_detector
 from .config import get_settings
+from .services import (
+    SpeechToTextService, 
+    TextToSpeechService, 
+    SpeechService,
+    get_stt_service,
+    get_tts_service,
+    get_speech_service
+)
 from .routers import auth, conversations
 from .database import get_db
 
@@ -50,6 +59,11 @@ settings = get_settings()
 # Initialize agent (lazy loading)
 _agent: Optional[WazobiaAgent] = None
 
+# Initialize speech services (lazy loading)
+_stt_service: Optional[SpeechToTextService] = None
+_tts_service: Optional[TextToSpeechService] = None
+_speech_service: Optional[SpeechService] = None
+
 # Rate limiting: Maximum 3 concurrent chat requests
 chat_semaphore = asyncio.Semaphore(3)
 
@@ -60,6 +74,35 @@ def get_agent() -> WazobiaAgent:
     if _agent is None:
         _agent = get_wazobia_agent()
     return _agent
+
+
+def get_stt() -> SpeechToTextService:
+    """Get or initialize STT service."""
+    global _stt_service
+    if _stt_service is None:
+        _stt_service = get_stt_service(api_key=settings.groq_api_key)
+    return _stt_service
+
+
+def get_tts() -> TextToSpeechService:
+    """Get or initialize TTS service."""
+    global _tts_service
+    if _tts_service is None:
+        _tts_service = get_tts_service()
+    return _tts_service
+
+
+def get_speech() -> SpeechService:
+    """Get or initialize full Speech service."""
+    global _speech_service
+    if _speech_service is None:
+        agent = get_agent()
+        _speech_service = get_speech_service(
+            stt_service=get_stt(),
+            tts_service=get_tts(),
+            agent=agent
+        )
+    return _speech_service
 
 
 # ============================================================================
@@ -91,7 +134,8 @@ class MessageResponse(BaseModel):
     language: str = Field(..., description="Language of response")
     detected_language: Optional[str] = Field(None, description="Detected input language")
     intent: str = Field(..., description="Detected intent")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata including confidence scores")
+    confidence_level: Optional[str] = Field(None, description="Confidence level: low, medium, or high")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     
     class Config:
@@ -101,7 +145,14 @@ class MessageResponse(BaseModel):
                 "language": "ha",
                 "detected_language": "ha",
                 "intent": "greeting",
-                "metadata": {"confidence": 0.95},
+                "confidence_level": "high",
+                "metadata": {
+                    "confidence_score": 0.95,
+                    "validation": {
+                        "is_valid": True,
+                        "confidence_score": 0.95
+                    }
+                },
                 "timestamp": "2025-12-15T10:30:00"
             }
         }
@@ -181,8 +232,107 @@ class StatsResponse(BaseModel):
 
 
 # ============================================================================
-# API Endpoints
+# Speech Endpoints Models
 # ============================================================================
+
+class SpeechToTextResponse(BaseModel):
+    """Response model for speech-to-text."""
+    text: str = Field(..., description="Transcribed text")
+    language: str = Field(..., description="Detected language code")
+    confidence: float = Field(..., description="Confidence score 0-1")
+    success: bool = Field(..., description="Whether transcription succeeded")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "Sannu, yaya kuke?",
+                "language": "ha",
+                "confidence": 0.87,
+                "success": True,
+                "timestamp": "2026-03-02T10:30:00"
+            }
+        }
+
+
+class TextToSpeechResponse(BaseModel):
+    """Response model for text-to-speech."""
+    success: bool = Field(..., description="Whether synthesis succeeded")
+    language: str = Field(..., description="Language of speech")
+    audio_length_ms: int = Field(..., description="Approximate audio duration")
+    encoding: str = Field(..., description="Audio format (mp3)")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "language": "ha",
+                "audio_length_ms": 3500,
+                "encoding": "mp3",
+                "timestamp": "2026-03-02T10:30:00"
+            }
+        }
+
+
+class TextToSpeechRequest(BaseModel):
+    """Request model for text-to-speech."""
+    text: str = Field(..., description="Text to convert to speech")
+    language: str = Field("en", description="Language code (ha, yo, pcm, en)")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "Sannu, yaya kuke?",
+                "language": "ha"
+            }
+        }
+
+
+class SpeechToSpeechRequest(BaseModel):
+    """Request model for speech-to-speech conversation."""
+    language_hint: Optional[str] = Field(None, description="Language hint (ha, yo, pcm, en)")
+    provide_text: bool = Field(True, description="Include transcribed text in response")
+    stream: bool = Field(False, description="Stream audio response for real-time playback")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "language_hint": "ha",
+                "provide_text": True,
+                "stream": False
+            }
+        }
+
+
+class SpeechToSpeechResponse(BaseModel):
+    """Response model for speech-to-speech."""
+    success: bool = Field(..., description="Whether processing succeeded")
+    input_text: Optional[str] = Field(None, description="Transcribed user input")
+    response_text: Optional[str] = Field(None, description="Agent's text response")
+    language: str = Field(..., description="Primary language used")
+    processing_times: Dict[str, float] = Field(..., description="Breakdown of processing times in ms")
+    total_time_ms: float = Field(..., description="Total processing time")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "input_text": "Sannu, yaya kuke?",
+                "response_text": "Lafiya lau! Yaya zan iya taimaka maka?",
+                "language": "ha",
+                "processing_times": {
+                    "stt_ms": 245,
+                    "llm_ms": 890,
+                    "tts_ms": 450
+                },
+                "total_time_ms": 1585,
+                "timestamp": "2026-03-02T10:30:00Z"
+            }
+        }
+
+
 
 @app.get("/")
 async def root():
@@ -190,14 +340,23 @@ async def root():
     return {
         "name": "Wazobia Multilingual Agent API",
         "version": "1.0.0",
-        "description": "AI agent for Nigerian languages (Hausa, Pidgin, Yoruba)",
+        "description": "AI agent for Nigerian languages (Hausa, Pidgin, Yoruba) with speech capabilities",
         "endpoints": {
             "POST /chat": "Process chat messages",
             "POST /translate": "Translate text between languages",
             "POST /detect-language": "Detect language of text",
             "POST /generate-content": "Generate content in Nigerian languages",
+            "POST /stt": "Speech-to-Text (audio input → text output)",
+            "POST /tts": "Text-to-Speech (text input → audio output)",
+            "POST /s2s": "Speech-to-Speech (voice chat with voice response)",
             "GET /stats": "Get agent statistics",
-            "GET /health": "Health check"
+            "GET /health": "Health check",
+            "GET /languages": "Get supported languages"
+        },
+        "speech_capabilities": {
+            "stt": "Groq Whisper API - Fast, accurate transcription",
+            "tts": "Google Cloud TTS - Natural-sounding voices",
+            "s2s": "Full voice conversation pipeline"
         },
         "supported_languages": ["Hausa (ha)", "Nigerian Pidgin (pcm)", "Yoruba (yo)", "English (en)"]
     }
@@ -227,7 +386,7 @@ async def chat(
     Process a chat message and generate a response.
     
     The agent will:
-    - Detect the language
+    - Detect the language 
     - Understand the intent
     - Retrieve relevant knowledge
     - Generate an appropriate response
@@ -260,6 +419,7 @@ async def chat(
                     
                     if session:
                         user_id = session['user_id']
+                        print(f"💾 Saving message for user_id: {user_id}")
                         
                         # Get or create a conversation for this user
                         conversations_list = db.get_user_conversations(user_id)
@@ -267,9 +427,11 @@ async def chat(
                         if conversations_list:
                             # Use the most recent conversation
                             conversation_id = conversations_list[0]['id']
+                            print(f"📝 Using existing conversation: {conversation_id}")
                         else:
                             # Create a new conversation
                             conversation_id = db.create_conversation(user_id, "New Conversation")
+                            print(f"🆕 Created new conversation: {conversation_id}")
                         
                         # Save user message
                         db.add_message(
@@ -286,16 +448,23 @@ async def chat(
                             content=result['response'],
                             language=result.get('language')
                         )
+                        print(f"✅ Successfully saved 2 messages to conversation {conversation_id}")
+                    else:
+                        print("⚠️ No session found for token")
                 except Exception as e:
                     # Log but don't fail the request if DB save fails
-                    print(f"Failed to save conversation: {e}")
+                    print(f"❌ Failed to save conversation: {e}")
+            else:
+                print("ℹ️ No authorization header - skipping message save")
             
             return MessageResponse(
                 response=result['response'],
                 language=result['language'],
-                detected_language=result['language'],
+                detected_language=result.get('metadata', {}).get('input_language', result['language']),
                 intent=result['intent'],
-                metadata=result.get('metadata', {})
+                confidence_level=result.get('metadata', {}).get('confidence_level', 'high'),
+                metadata=result.get('metadata', {}),
+                timestamp=datetime.now().isoformat()
             )
         
         except Exception as e:
@@ -436,6 +605,174 @@ async def clear_history():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing history: {str(e)}")
+
+
+# ============================================================================
+# Speech Endpoints
+# ============================================================================
+
+@app.post("/stt", response_model=SpeechToTextResponse)
+async def speech_to_text(
+    file: UploadFile = File(..., description="Audio file (wav, mp3, ogg, etc.)"),
+    language_hint: Optional[str] = None
+):
+    """
+    Convert speech (audio) to text using Groq Whisper API.
+    
+    Supports:
+    - Hausa (ha), Yoruba (yo), Nigerian Pidgin (pcm), English (en)
+    - Audio formats: WAV, MP3, OGG, FLAC, WebM
+    
+    Returns transcribed text with confidence score.
+    """
+    try:
+        # Read audio data
+        audio_data = await file.read()
+        
+        if not audio_data:
+            raise HTTPException(status_code=400, detail="No audio data provided")
+        
+        # Get MIME type from filename
+        mime_type = file.content_type or "audio/wav"
+        
+        # Process with STT service
+        stt_service = get_stt()
+        result = await stt_service.transcribe(
+            audio_data=audio_data,
+            language=language_hint,
+            mime_type=mime_type
+        )
+        
+        if not result['success']:
+            raise HTTPException(status_code=400, detail=result.get('error', 'Transcription failed'))
+        
+        return SpeechToTextResponse(
+            text=result['text'],
+            language=result['language'],
+            confidence=result['confidence'],
+            success=True
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Speech-to-text error: {str(e)}")
+
+
+@app.post("/tts")
+async def text_to_speech(request: TextToSpeechRequest):
+    """
+    Convert text to speech using Piper TTS.
+    
+    Supports:
+    - Hausa (ha), Yoruba (yo), Nigerian Pidgin (pcm), English (en)
+    
+    Returns WAV audio stream ready for playback.
+    """
+    try:
+        text = request.text
+        language = request.language
+        
+        if not text or len(text.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        
+        if len(text) > 5000:
+            raise HTTPException(status_code=400, detail="Text exceeds maximum length (5000 characters)")
+        
+        # Get TTS service
+        tts_service = get_tts()
+        result = await tts_service.synthesize(
+            text=text,
+            language=language
+        )
+        
+        if not result['success']:
+            raise HTTPException(status_code=400, detail=result.get('error', 'Synthesis failed'))
+        
+        # Return audio file as WAV
+        return StreamingResponse(
+            iter([result['audio']]),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": "attachment; filename=response.wav",
+                "X-Audio-Length-Ms": str(result['audio_length_ms']),
+                "X-Language": result['language']
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Text-to-speech error: {str(e)}")
+
+
+@app.post("/s2s")
+async def speech_to_speech(
+    file: UploadFile = File(..., description="Audio file (wav, mp3, ogg, etc.)"),
+    request_data: Optional[SpeechToSpeechRequest] = None
+):
+    """
+    Complete voice conversation: Speech-to-Text → LLM → Text-to-Speech.
+    
+    This is the main voice interface. Send audio, get voice response.
+    
+    Supports:
+    - Hausa (ha), Yoruba (yo), Nigerian Pidgin (pcm), English (en)
+    - Audio formats: WAV, MP3, OGG, FLAC, WebM
+    
+    Returns:
+    - Transcribed input text
+    - AI-generated response text
+    - Synthesized speech audio (MP3)
+    - Performance metrics
+    """
+    try:
+        # Read audio data
+        audio_data = await file.read()
+        
+        if not audio_data:
+            raise HTTPException(status_code=400, detail="No audio data provided")
+        
+        # Get MIME type
+        mime_type = file.content_type or "audio/wav"
+        
+        # Parse request data if provided
+        language_hint = None
+        if request_data:
+            language_hint = request_data.language_hint
+        
+        # Get Speech service
+        speech_service = get_speech()
+        result = await speech_service.speech_to_speech(
+            audio_data=audio_data,
+            language_hint=language_hint,
+            mime_type=mime_type,
+            stream_response=False  # For now, return complete audio
+        )
+        
+        if not result['success']:
+            raise HTTPException(status_code=400, detail=result.get('error', 'Processing failed'))
+        
+        # Return audio response
+        return StreamingResponse(
+            iter([result['audio']]),
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "attachment; filename=response.mp3",
+                "X-Input-Text": result.get('input_text', ''),
+                "X-Response-Text": result.get('response_text', ''),
+                "X-Language": result['language'],
+                "X-Total-Time-Ms": str(result['total_time_ms']),
+                "X-STT-Ms": str(result['processing_times'].get('stt_ms', 0)),
+                "X-LLM-Ms": str(result['processing_times'].get('llm_ms', 0)),
+                "X-TTS-Ms": str(result['processing_times'].get('tts_ms', 0))
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Speech-to-speech error: {str(e)}")
 
 
 @app.get("/languages")
