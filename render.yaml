@@ -3,7 +3,7 @@ services:
     name: wazobia-agent-backend
     runtime: python
     runtimeVersion: 3.10
-    buildCommand: pip install --no-cache-dir -r requirements.txt
+    buildCommand: bash build.sh
     startCommand: uvicorn app.api:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: WAZOBIA_LLM_PROVIDER
@@ -12,5 +12,8 @@ services:
         value: production
       - key: GROQ_API_KEY
         sync: false
-      mountPath: /var/data
-      sizeGB: 1
+      - key: PIPER_HOME
+        value: /var/data/piper
+    mounts:
+      - path: /var/data
+        sizeGB: 1

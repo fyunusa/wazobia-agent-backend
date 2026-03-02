@@ -4,6 +4,8 @@ Text-to-Speech Service
 Piper TTS integration for lightweight, offline natural voice synthesis.
 Optimized for Nigerian languages: Yoruba, Hausa, Pidgin, English.
 
+Uses PIPER_HOME environment variable for persistent model caching on Render.
+
 Author: Autonomous Implementation
 Date: March 2026
 """
@@ -16,14 +18,20 @@ import subprocess
 import json
 import tempfile
 import os
+import time
 
 logger = logging.getLogger(__name__)
+
+# Set Piper home directory - uses /var/data/piper on Render (persistent storage)
+# Falls back to default cache on local dev
+PIPER_HOME = os.environ.get('PIPER_HOME', os.path.expanduser('~/.local/share/piper'))
 
 
 class TextToSpeechService:
     """
     Text-to-Speech service using Piper TTS.
     Lightweight, offline-first, and optimized for speed.
+    Models cached in persistent storage for Render deployments.
     """
     
     # Language-to-voice mapping for Piper
@@ -49,6 +57,7 @@ class TextToSpeechService:
     def __init__(self):
         """Initialize Piper TTS service."""
         self.supported_languages = list(self.VOICE_CONFIGS.keys())
+        logger.info(f"Piper TTS initialized with PIPER_HOME={PIPER_HOME}")
     
     async def synthesize(
         self,
@@ -146,18 +155,23 @@ class TextToSpeechService:
                 output_file = f.name
             
             try:
-                # Run piper command
-                # Format: echo "text" | piper --model voice --output_file output.wav
+                # Run piper command with PIPER_HOME for model caching
+                env = os.environ.copy()
+                env['PIPER_HOME'] = PIPER_HOME
+                
+                # Format: cat input.txt | piper --model voice --output_file output.wav
                 process = await asyncio.create_subprocess_shell(
                     f"cat {input_file} | piper --model {voice} --output_file {output_file}",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    env=env,
                 )
                 
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10.0)
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15.0)
                 
                 if process.returncode != 0:
-                    logger.error(f"Piper error: {stderr.decode() if stderr else 'Unknown error'}")
+                    error_msg = stderr.decode() if stderr else 'Unknown error'
+                    logger.error(f"Piper error: {error_msg}")
                     return b''
                 
                 # Read output audio file
